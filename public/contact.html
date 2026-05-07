@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EchoMeet - Contact</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <canvas id="bg-canvas"></canvas>
+    <header class="site-header"><div class="site-shell nav-row"><a class="logo" href="/"><i class="fas fa-comments"></i><span>EchoMeet</span></a><nav class="site-nav" aria-label="Primary navigation"><a href="/features.html">Features</a><a href="/about.html">About</a><a href="/faq.html">FAQ</a><a class="active" href="/contact.html">Contact</a><a href="/dashboard">Dashboard</a></nav><div class="site-actions"><a href="/login" class="btn-secondary">Log In</a><a href="/signup" class="btn-primary">Create Account</a></div></div></header>
+    <main class="content-page">
+        <section class="content-section"><div class="site-shell page-hero"><p class="kicker">Contact</p><h1>We are here to help your team communicate better.</h1><p>Reach out for onboarding, technical support, accessibility questions, or partnership requests.</p></div></section>
+        <section class="content-section section-soft">
+            <div class="site-shell contact-grid">
+                <article class="value-card">
+                    <h3>Support</h3>
+                    <p>Email: support@echomeet.app</p>
+                    <p>Response window: Monday-Friday, 9:00-18:00 (UTC+5)</p>
+                </article>
+                <article class="value-card">
+                    <h3>Sales & partnerships</h3>
+                    <p>Email: partnerships@echomeet.app</p>
+                    <p>For enterprise deployments and education/community collaborations.</p>
+                </article>
+                <article class="value-card">
+                    <h3>Accessibility inquiries</h3>
+                    <p>Email: accessibility@echomeet.app</p>
+                    <p>Share feedback on inclusivity, assistive workflows, and usability barriers.</p>
+                </article>
+            </div>
+        </section>
+        <section class="content-section">
+            <div class="site-shell form-shell">
+                <h2>Send an inquiry</h2>
+                <p class="section-note">Frontend form UI only. Connect this form to backend handling when needed.</p>
+                <form class="contact-form" action="#" method="post">
+                    <label>Full name<input type="text" placeholder="Your full name" required></label>
+                    <label>Email<input type="email" placeholder="you@example.com" required></label>
+                    <label>Topic<select><option>General support</option><option>Technical issue</option><option>Partnership request</option><option>Accessibility feedback</option></select></label>
+                    <label>Message<textarea placeholder="Tell us how we can help" required></textarea></label>
+                    <button type="submit" class="btn-primary">Submit inquiry</button>
+                </form>
+            </div>
+        </section>
+    </main>
+    <footer class="site-footer"><div class="site-shell footer-grid"><section><a class="logo" href="/"><i class="fas fa-comments"></i><span>EchoMeet</span></a><p>Inclusive communication platform for voice, text, sign, and AI-assisted conversations.</p></section><section><h3>Product</h3><a href="/features.html">Features</a><a href="/dashboard">Dashboard</a><a href="/help-center.html">Help Center</a></section><section><h3>Company</h3><a href="/about.html">About</a><a href="/contact.html">Contact</a><a href="/faq.html">FAQ</a></section><section><h3>Legal</h3><a href="/privacy.html">Privacy Policy</a><a href="/terms.html">Terms of Service</a><a href="mailto:support@echomeet.app">support@echomeet.app</a></section></div><div class="site-shell footer-bottom"><small>&copy; 2026 EchoMeet. All rights reserved.</small></div></footer>
+    <script src="three-bg.js"></script>
+</body>
+</html>

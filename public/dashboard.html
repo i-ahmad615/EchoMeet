@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EchoMeet - Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="/socket.io/socket.io.js"></script>
+    </head>
+<body>
+    <canvas id="bg-canvas"></canvas>
+    
+    <div class="dashboard-container">
+        <div class="dashboard-header">
+            <div class="logo"><i class="fas fa-comments"></i><span>EchoMeet</span></div>
+            <nav class="dash-mini-nav" aria-label="Dashboard secondary navigation">
+                <a href="/features.html">Features</a>
+                <a href="/help-center.html">Help</a>
+                <a href="/contact.html">Contact</a>
+            </nav>
+            <div class="user-info">
+                <i class="fas fa-user-circle"></i>
+                <span id="username-display"></span>
+                <a href="/profile" class="icon-btn"><i class="fas fa-user-edit"></i></a>
+                <button id="logout-btn" class="icon-btn"><i class="fas fa-sign-out-alt"></i></button>
+            </div>
+        </div>
+
+        <section class="dashboard-intro">
+            <p class="kicker">Workspace</p>
+            <h1>Manage your communication network with confidence</h1>
+            <p>Search users, review friend requests, and launch calls from one centralized dashboard.</p>
+        </section>
+
+        <section class="dashboard-stats" aria-label="Dashboard quick stats">
+            <article class="stat-card">
+                <span>Friends</span>
+                <strong id="stat-friends">0</strong>
+                <small>Connected contacts</small>
+            </article>
+            <article class="stat-card">
+                <span>Incoming requests</span>
+                <strong id="stat-incoming">0</strong>
+                <small>Awaiting action</small>
+            </article>
+            <article class="stat-card">
+                <span>Sent requests</span>
+                <strong id="stat-outgoing">0</strong>
+                <small>Pending responses</small>
+            </article>
+        </section>
+        
+        <div class="search-section">
+            <div class="section-intro">
+                <h2>Find people</h2>
+                <p>Search by username or email and send a connection request.</p>
+            </div>
+            <div class="search-box">
+                <i class="fas fa-search"></i>
+                <input type="text" id="search-input" placeholder="Search users by username or email...">
+                <button id="search-btn">Search</button>
+            </div>
+            <div id="search-results" class="search-results"></div>
+        </div>
+        
+        <div class="dashboard-main">
+            <div class="requests-section">
+                <div class="section-header"><i class="fas fa-user-plus"></i><h3>Friend Requests</h3></div>
+                <p class="section-note">Incoming requests need your approval. Sent requests can be withdrawn anytime.</p>
+                <div id="requests-list" class="requests-list"><p class="empty-message">No pending requests</p></div>
+            </div>
+            <div class="friends-section">
+                <div class="section-header"><i class="fas fa-users"></i><h3>Your Friends</h3></div>
+                <p class="section-note">Your active contacts list for voice/video sessions and live chat.</p>
+                <div id="friends-list" class="friends-list"><p class="empty-message">No friends yet. Search and add friends above!</p></div>
+            </div>
+        </div>
+
+        <aside class="dashboard-help-panel">
+            <h3><i class="fas fa-circle-info"></i> Helpful tips</h3>
+            <ul>
+                <li>Use one account per browser profile while testing two-way calls.</li>
+                <li>If you just accepted a request, refresh visible tabs to sync lists immediately.</li>
+                <li>Need setup help? Visit <a href="/help-center.html">Help Center</a>.</li>
+            </ul>
+        </aside>
+
+        <footer class="dashboard-footer">
+            <small>EchoMeet dashboard updates in real time through Socket.IO and persistent SQLite records.</small>
+        </footer>
+    </div>
+
+    <div id="incoming-call-toast" class="incoming-call-toast hidden">
+        <h4><i class="fas fa-phone-alt"></i> Incoming Call</h4>
+        <p><strong id="caller-name">Someone</strong> is calling you...</p>
+        <div class="toast-buttons">
+            <button id="accept-call-btn" class="accept-call-btn"><i class="fas fa-check"></i> Accept</button>
+            <button id="reject-call-btn" class="reject-call-btn"><i class="fas fa-times"></i> Reject</button>
+        </div>
+    </div>
+
+    <script src="three-bg.js"></script>
+    <script>
+        const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+        if (!currentUser.username) window.location.href = '/login';
+        
+        document.getElementById('username-display').innerHTML = currentUser.username;
+
+        /** Sync localStorage id with SQLite PK (fixes mismatched id vs username / number vs string). */
+        async function hydrateCurrentUserFromDb() {
+            try {
+                const res = await fetch(`/api/users/${encodeURIComponent(currentUser.username)}`, {
+                    cache: 'no-store'
+                });
+                const data = await res.json();
+                if (!data.user?.id) return false;
+                const canon = String(data.user.id).trim();
+                currentUser.id = canon;
+                if (data.user.peerId) currentUser.peerId = data.user.peerId;
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                return true;
+            } catch (e) {
+                console.error('hydrateCurrentUserFromDb', e);
+                return false;
+            }
+        }
+        
+        let pendingCall = null;
+        const socket = io();
+        socket.emit('user-online', { userId: currentUser.username, peerId: currentUser.peerId || 'peer_' + Date.now() });
+        
+        let myFriends = [];
+        let pendingRequests = [];
+        let outgoingRequests = [];
+        let outgoingPendingIds = new Set();
+
+        async function loadFriendsFromApi() {
+            const hydrated = await hydrateCurrentUserFromDb();
+            if (!hydrated) {
+                alert('Could not verify your account — please log in again.');
+                window.location.href = '/login';
+                return;
+            }
+            try {
+                const res = await fetch(
+                    `/api/users/friends?userId=${encodeURIComponent(currentUser.id)}` +
+                    `&username=${encodeURIComponent(currentUser.username)}`,
+                    { cache: 'no-store' }
+                );
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to load friends');
+
+                pendingRequests = (data.incomingRequests || []).map((u) => ({
+                    id: u.id,
+                    name: u.username,
+                    email: u.email
+                }));
+                outgoingRequests = (data.outgoingRequests || []).map((u) => ({
+                    id: u.id,
+                    name: u.username,
+                    email: u.email
+                }));
+                outgoingPendingIds = new Set(outgoingRequests.map((r) => r.id));
+                myFriends = (data.friends || []).map((u) => ({
+                    id: u.id,
+                    name: u.username,
+                    email: u.email
+                }));
+                renderRequestsList();
+                renderFriendsList();
+                updateDashboardStats();
+            } catch (e) {
+                console.error(e);
+                alert('Could not load friends: ' + e.message);
+            }
+        }
+
+        function updateDashboardStats() {
+            const f = document.getElementById('stat-friends');
+            const i = document.getElementById('stat-incoming');
+            const o = document.getElementById('stat-outgoing');
+            if (f) f.innerText = String(myFriends.length);
+            if (i) i.innerText = String(pendingRequests.length);
+            if (o) o.innerText = String(outgoingRequests.length);
+        }
+        
+        function renderRequestsList() {
+            const container = document.getElementById('requests-list');
+            if (pendingRequests.length === 0 && outgoingRequests.length === 0) {
+                container.innerHTML = '<p class="empty-message">No pending requests</p>';
+                return;
+            }
+            let html = '';
+            if (pendingRequests.length > 0) {
+                html += '<div class="requests-subtitle">Incoming</div>';
+                html += pendingRequests.map(req => `
+                <div class="request-item" data-id="${req.id}">
+                    <i class="fas fa-user-circle"></i>
+                    <div class="request-info">
+                        <strong>${req.name}</strong>
+                        <small>${req.email}</small>
+                    </div>
+                    <div class="request-actions">
+                        <button class="accept-req" data-id="${req.id}" data-name="${req.name}" data-email="${req.email}">Accept</button>
+                        <button class="reject-req" data-id="${req.id}" data-name="${req.name}">Reject</button>
+                    </div>
+                </div>
+            `).join('');
+            }
+            if (outgoingRequests.length > 0) {
+                html += '<div class="requests-subtitle">Sent</div>';
+                html += outgoingRequests.map(req => `
+                <div class="request-item outgoing-request" data-id="${req.id}">
+                    <i class="fas fa-user-circle"></i>
+                    <div class="request-info">
+                        <strong>${req.name}</strong>
+                        <small>${req.email}</small>
+                    </div>
+                    <div class="request-actions">
+                        <button type="button" class="cancel-outgoing-req" data-id="${req.id}" data-name="${req.name}">Cancel</button>
+                    </div>
+                </div>
+            `).join('');
+            }
+            container.innerHTML = html;
+            
+            // Accept button
+            document.querySelectorAll('.accept-req').forEach(btn => {
+                btn.onclick = async () => {
+                    const friendId = btn.dataset.id;
+                    const friendName = btn.dataset.name;
+                    const res = await fetch('/api/users/accept-request', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        cache: 'no-store',
+                        body: JSON.stringify({ userId: currentUser.id, friendId })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        alert(data.error || 'Could not accept request');
+                        return;
+                    }
+                    await loadFriendsFromApi();
+                    alert(`✅ You are now friends with ${friendName}!`);
+                };
+            });
+            
+            document.querySelectorAll('.reject-req').forEach(btn => {
+                btn.onclick = async () => {
+                    const friendId = btn.dataset.id;
+                    const friendName = btn.dataset.name;
+                    const res = await fetch('/api/users/reject-request', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        cache: 'no-store',
+                        body: JSON.stringify({ userId: currentUser.id, friendId })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        alert(data.error || 'Could not reject request');
+                        return;
+                    }
+                    await loadFriendsFromApi();
+                    alert(`❌ Friend request from ${friendName} rejected`);
+                };
+            });
+
+            document.querySelectorAll('.cancel-outgoing-req').forEach(btn => {
+                btn.onclick = async () => {
+                    const friendId = btn.dataset.id;
+                    const friendName = btn.dataset.name;
+                    const res = await fetch('/api/users/cancel-friend-request', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        cache: 'no-store',
+                        body: JSON.stringify({ userId: currentUser.id, friendId })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        alert(data.error || 'Could not cancel request');
+                        return;
+                    }
+                    await loadFriendsFromApi();
+                    alert(`Request to ${friendName} withdrawn`);
+                };
+            });
+        }
+        
+        function renderFriendsList() {
+            const container = document.getElementById('friends-list');
+            if (myFriends.length === 0) {
+                container.innerHTML = '<p class="empty-message">No friends yet. Search and add friends above!</p>';
+                return;
+            }
+            container.innerHTML = myFriends.map(friend => `
+                <div class="friend-item">
+                    <div class="friend-avatar">
+                        <i class="fas fa-user-circle"></i>
+                        <span class="online-dot"></span>
+                    </div>
+                    <div class="friend-info">
+                        <strong>${friend.name}</strong>
+                        <small>${friend.email}</small>
+                    </div>
+                    <button class="call-friend-btn" data-name="${friend.name}" data-id="${friend.id}">
+                        <i class="fas fa-phone-alt"></i> Call
+                    </button>
+                </div>
+            `).join('');
+            
+            document.querySelectorAll('.call-friend-btn').forEach(btn => {
+                btn.onclick = () => startCall(btn.dataset.name, btn.dataset.id);
+            });
+        }
+        
+        // Search users
+        document.getElementById('search-btn').onclick = async () => {
+            const query = document.getElementById('search-input').value;
+            if (!query.trim()) return;
+            
+            const response = await fetch(`/api/users/search?q=${encodeURIComponent(query)}`, {
+                cache: 'no-store'
+            });
+            const data = await response.json();
+            
+            const resultsDiv = document.getElementById('search-results');
+            if (data.users.length === 0) {
+                resultsDiv.innerHTML = '<p class="empty-message">No users found</p>';
+                return;
+            }
+            
+            resultsDiv.innerHTML = data.users
+                .filter(u => u.username !== currentUser.username)
+                .map(u => `
+                    <div class="search-result">
+                        <i class="fas fa-user-circle"></i>
+                        <div class="user-details">
+                            <strong>${u.username}</strong>
+                            <small>${u.email}</small>
+                        </div>
+                        <button class="add-friend-btn" data-id="${u.id}" data-name="${u.username}" data-email="${u.email}">Add Friend</button>
+                    </div>
+                `).join('');
+            
+            document.querySelectorAll('.add-friend-btn').forEach(btn => {
+                btn.onclick = async () => {
+                    const friendId = btn.dataset.id;
+                    const friendName = btn.dataset.name;
+                    
+                    if (outgoingPendingIds.has(friendId)) {
+                        alert(`Request already sent to ${friendName}`);
+                        return;
+                    }
+                    if (myFriends.some(f => f.id === friendId)) {
+                        alert(`${friendName} is already your friend`);
+                        return;
+                    }
+                    if (pendingRequests.some(r => r.id === friendId)) {
+                        alert(`You have a pending request from ${friendName} — check Friend Requests.`);
+                        return;
+                    }
+
+                    await hydrateCurrentUserFromDb();
+                    const res = await fetch('/api/users/friend-request', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        cache: 'no-store',
+                        body: JSON.stringify({ userId: currentUser.id, friendId })
+                    });
+                    const data = await res.json();
+                    if (res.status === 409) {
+                        alert(data.error || 'Cannot send request');
+                        await loadFriendsFromApi();
+                        return;
+                    }
+                    if (!res.ok) {
+                        alert(data.error || 'Failed to send request');
+                        return;
+                    }
+                    if (data.duplicate) {
+                        alert(`Request already sent to ${friendName}`);
+                    } else {
+                        alert(`Friend request sent to ${friendName}!`);
+                    }
+                    btn.disabled = true;
+                    btn.innerText = 'Sent';
+                    await loadFriendsFromApi();
+                };
+            });
+        };
+        
+        // ============================================
+        // CALL SYSTEM
+        // ============================================
+        function startCall(friendName, friendId) {
+            socket.emit('call-user', { to: friendName, from: currentUser.username, fromId: currentUser.id });
+            alert(`📞 Calling ${friendName}... Please wait for them to accept.`);
+            localStorage.setItem('waitingForCall', JSON.stringify({ friendName, friendId, time: Date.now() }));
+        }
+        
+        socket.on('incoming-call', (data) => {
+            pendingCall = data;
+            document.getElementById('caller-name').innerText = data.from;
+            document.getElementById('incoming-call-toast').classList.remove('hidden');
+        });
+        
+        document.getElementById('accept-call-btn').onclick = () => {
+            if (pendingCall) {
+                socket.emit('call-accepted', { to: pendingCall.from, from: currentUser.username });
+                document.getElementById('incoming-call-toast').classList.add('hidden');
+                window.location.href = `/video-call?friend=${encodeURIComponent(pendingCall.from)}&friendId=${encodeURIComponent(pendingCall.fromId)}&type=receiver`;
+            }
+            pendingCall = null;
+        };
+        
+        document.getElementById('reject-call-btn').onclick = () => {
+            if (pendingCall) {
+                socket.emit('call-rejected', { to: pendingCall.from, from: currentUser.username });
+                document.getElementById('incoming-call-toast').classList.add('hidden');
+                alert(`Call from ${pendingCall.from} rejected`);
+            }
+            pendingCall = null;
+        };
+        
+        socket.on('call-accepted', (data) => {
+            const waiting = localStorage.getItem('waitingForCall');
+            if (waiting) {
+                const callData = JSON.parse(waiting);
+                if (callData.friendName === data.from) {
+                    localStorage.removeItem('waitingForCall');
+                    window.location.href = `/video-call?friend=${encodeURIComponent(callData.friendName)}&friendId=${encodeURIComponent(callData.friendId)}&type=initiator`;
+                }
+            }
+        });
+        
+        socket.on('call-rejected', (data) => {
+            localStorage.removeItem('waitingForCall');
+            alert(`❌ ${data.from} rejected your call.`);
+        });
+        
+        // Logout
+        document.getElementById('logout-btn').onclick = () => {
+            localStorage.clear();
+            window.location.href = '/login';
+        };
+        
+        loadFriendsFromApi();
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') loadFriendsFromApi();
+        });
+        
+        // Clean up old waiting calls
+        const waiting = localStorage.getItem('waitingForCall');
+        if (waiting) {
+            const callData = JSON.parse(waiting);
+            if (Date.now() - callData.time > 30000) localStorage.removeItem('waitingForCall');
+        }
+    </script>
+</body>
+</html>

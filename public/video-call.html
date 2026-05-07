@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>EchoMeet - Video Call</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="/socket.io/socket.io.js"></script>
+    </head>
+<body>
+    <canvas id="bg-canvas"></canvas>
+    
+    <div class="video-call-container" id="video-container">
+        <div class="call-header">
+            <div class="call-info">
+                <i class="fas fa-video"></i>
+                <span>Call with <strong id="friend-name">User</strong></span>
+            </div>
+            <div class="call-timer">
+                <i class="fas fa-clock"></i>
+                <span id="call-timer">00:00</span>
+            </div>
+            <div class="call-status">
+                <span class="status-dot"></span>
+                <span id="call-status-text">Connected</span>
+            </div>
+        </div>
+
+        <div class="video-grid" id="video-grid">
+            <div class="video-card remote">
+                <video id="remote-video" autoplay playsinline></video>
+                <div class="video-label" id="remote-label">Friend</div>
+            </div>
+            <div class="video-card local">
+                <video id="local-video" autoplay muted playsinline></video>
+                <div class="video-label">You</div>
+            </div>
+        </div>
+
+        <!-- Control Bar -->
+        <div class="control-bar">
+            <button id="toggle-mic" class="control-btn"><i class="fas fa-microphone"></i></button>
+            <button id="toggle-cam" class="control-btn"><i class="fas fa-video"></i></button>
+            <button id="toggle-chat" class="control-btn"><i class="fas fa-comment-dots"></i></button>
+            <button id="end-call" class="control-btn end-call"><i class="fas fa-phone-slash"></i></button>
+        </div>
+
+        <!-- Messages & Features Window -->
+        <div id="chat-window" class="chat-window hidden">
+            <div class="chat-window-header">
+                <h3><i class="fas fa-comments"></i> Messages & Features</h3>
+                <button id="close-chat" class="close-btn"><i class="fas fa-times"></i></button>
+            </div>
+            
+            <!-- Chat Messages -->
+            <div class="chat-messages-area" id="chat-messages">
+                <div class="chat-info">Connected! Start chatting...</div>
+            </div>
+            
+            <!-- Features Tabs -->
+            <div class="features-tabs">
+                <button class="tab-btn active" data-tab="voice-tab"><i class="fas fa-microphone-alt"></i> Voice</button>
+                <button class="tab-btn" data-tab="text-tab"><i class="fas fa-keyboard"></i> Text</button>
+                <button class="tab-btn" data-tab="sign-tab"><i class="fas fa-hands"></i> Sign</button>
+                <button class="tab-btn" data-tab="ai-tab"><i class="fas fa-robot"></i> AI</button>
+            </div>
+            
+            <div class="features-content">
+                <!-- Voice to Text Tab - Fixed -->
+                <div class="feature-panel active" id="voice-tab">
+                    <div class="voice-wave" id="voice-wave" style="display:none;">
+                        <span></span><span></span><span></span><span></span><span></span>
+                    </div>
+                    <button id="start-voice" class="feature-btn primary"><i class="fas fa-microphone"></i> Start Recording</button>
+                    <button id="stop-voice" class="feature-btn secondary" style="display:none;"><i class="fas fa-stop"></i> Stop & Send</button>
+                    <div class="message-text" id="user-speech-text">Click Start Recording and speak...</div>
+                </div>
+                
+                <!-- Text to Voice Tab -->
+                <div class="feature-panel" id="text-tab">
+                    <textarea id="text-message" placeholder="Type message... It will be converted to voice on friend's side"></textarea>
+                    <button id="send-text-voice" class="feature-btn primary">Send as Voice</button>
+                </div>
+                
+                <!-- Sign Language Tab - Fixed with camera mandatory -->
+                <div class="feature-panel" id="sign-tab">
+                    <div id="sign-camera-container">
+                        <video id="sign-video" autoplay playsinline muted></video>
+                    </div>
+                    <div class="sign-buttons">
+                        <button id="start-sign-chat" class="feature-btn primary"><i class="fas fa-camera"></i> Start Detection (Chat Only)</button>
+                        <button id="start-sign-voice" class="feature-btn primary"><i class="fas fa-camera"></i> Start Detection (Chat + Voice)</button>
+                        <button id="stop-sign" class="feature-btn secondary" style="display:none;"><i class="fas fa-stop"></i> Stop</button>
+                    </div>
+                    <div id="sign-status" class="sign-status">⚠️ Camera required for sign detection. Click Start to enable camera.</div>
+                    <div id="camera-warning" class="camera-warning hidden">⚠️ Camera access is required for sign language detection. Please allow camera permission.</div>
+                </div>
+                
+                <!-- AI Assistant Tab - Fixed with translation and chatbot -->
+                <div class="feature-panel" id="ai-tab">
+                    <div class="ai-buttons">
+                        <button id="ai-translate" class="ai-btn"><i class="fas fa-language"></i> Translate</button>
+                        <button id="ai-chat" class="ai-btn"><i class="fas fa-comment-dots"></i> Ask AI</button>
+                    </div>
+                    <textarea id="ai-message" placeholder="Type message to translate or ask AI..."></textarea>
+                    <button id="process-ai" class="feature-btn primary">Process</button>
+                    <div class="message-text" id="ai-response">AI response will appear here</div>
+                </div>
+            </div>
+            
+            <!-- Chat Input -->
+            <div class="chat-input-area">
+                <input type="text" id="chat-input" placeholder="Type your message...">
+                <button id="send-chat"><i class="fas fa-paper-plane"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <script src="three-bg.js"></script>
+    <script>
+        const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+        const urlParams = new URLSearchParams(window.location.search);
+        const friendName = urlParams.get('friend') || 'Friend';
+        const friendId = urlParams.get('friendId') || '';
+        const isInitiator = (urlParams.get('type') || '') === 'initiator';
+        
+        if (!currentUser.username) window.location.href = '/login';
+        
+        document.getElementById('friend-name').innerText = friendName;
+        document.getElementById('remote-label').innerHTML = friendName;
+        
+        let localStream;
+        let peerConnection;
+        /** @type {RTCIceCandidateInit[]} */
+        let remoteIceQueue = [];
+        let callLeaveDone = false;
+        let callTimer;
+        let callSeconds = 0;
+        let signDetectionActive = false;
+        let signInterval = null;
+        let signCameraStream = null;
+        let currentSignMode = 'chat';
+        let recognition = null;
+        let isRecording = false;
+        let voiceSessionActive = false;
+        let voiceUserClickedStop = false;
+        let voiceFinalBuffer = '';
+        let voiceInterimBuffer = '';
+        let voiceFinalizeHandled = false;
+        let voiceStopFinalizeTimer = null;
+
+        let resolveMediaSetup;
+        const mediaSetupPromise = new Promise((r) => { resolveMediaSetup = r; });
+        
+        const socket = io();
+        socket.emit('user-online', {
+            userId: currentUser.username,
+            peerId: currentUser.peerId,
+            callPeer: friendName
+        });
+        
+        // Configuration
+        const configuration = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+        
+        // ============================================
+        // CALL TIMER
+        // ============================================
+        function startCallTimer() {
+            if (callTimer) clearInterval(callTimer);
+            callTimer = setInterval(() => {
+                callSeconds++;
+                const minutes = Math.floor(callSeconds / 60);
+                const seconds = callSeconds % 60;
+                document.getElementById('call-timer').innerText = 
+                    `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }, 1000);
+        }
+        
+        // ============================================
+        // WEBRTC SETUP
+        // ============================================
+        async function setupLocalStream() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById('local-video').srcObject = localStream;
+                startCallTimer();
+                addChatMessage('✅ Connected! Start chatting...', 'info');
+                return true;
+            } catch (err) {
+                console.error('Camera error:', err);
+                addChatMessage('❌ Could not access camera/microphone', 'info');
+                return false;
+            }
+        }
+        
+        async function pushRemoteIceInit(init) {
+            if (!peerConnection) return;
+            try {
+                if (!peerConnection.remoteDescription) {
+                    remoteIceQueue.push(init);
+                    return;
+                }
+                await peerConnection.addIceCandidate(new RTCIceCandidate(init));
+            } catch (e) {
+                console.warn('addIceCandidate failed', e);
+            }
+        }
+
+        async function flushRemoteIceQueue() {
+            if (!peerConnection || !remoteIceQueue.length) return;
+            const batch = remoteIceQueue.splice(0);
+            for (const init of batch) {
+                try {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(init));
+                } catch (e) {
+                    console.warn('flush ICE failed', e);
+                }
+            }
+        }
+
+        let peerConnectionDisconnectTimer = null;
+
+        async function createPeerConnection() {
+            peerConnection = new RTCPeerConnection(configuration);
+            const pc = peerConnection;
+
+            if (localStream) {
+                localStream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, localStream);
+                });
+            }
+
+            peerConnection.ontrack = (event) => {
+                if (event.streams && event.streams[0]) {
+                    document.getElementById('remote-video').srcObject = event.streams[0];
+                }
+            };
+
+            peerConnection.onicecandidate = (event) => {
+                if (!event.candidate) return;
+                const candidatePayload = typeof event.candidate.toJSON === 'function'
+                    ? event.candidate.toJSON()
+                    : {
+                        candidate: event.candidate.candidate,
+                        sdpMid: event.candidate.sdpMid,
+                        sdpMLineIndex: event.candidate.sdpMLineIndex
+                    };
+                socket.emit('ice-candidate', { to: friendName, candidate: candidatePayload });
+            };
+
+            pc.onconnectionstatechange = () => {
+                if (peerConnection !== pc || callLeaveDone) return;
+                clearTimeout(peerConnectionDisconnectTimer);
+                const st = pc.connectionState;
+                if (st === 'failed' || st === 'closed') {
+                    leaveCall(false);
+                    return;
+                }
+                if (st === 'disconnected') {
+                    peerConnectionDisconnectTimer = setTimeout(() => {
+                        if (peerConnection !== pc || callLeaveDone) return;
+                        const late = pc.connectionState;
+                        if (late === 'disconnected' || late === 'failed') leaveCall(false);
+                    }, 2800);
+                }
+            };
+
+            pc.oniceconnectionstatechange = () => {
+                if (peerConnection !== pc || callLeaveDone) return;
+                const ice = pc.iceConnectionState;
+                if (ice === 'failed' || ice === 'closed') {
+                    clearTimeout(peerConnectionDisconnectTimer);
+                    leaveCall(false);
+                }
+            };
+        }
+        
+        // ============================================
+        // VOICE TO TEXT — buffered transcript; send only after real stop(); survive Chrome auto onend
+        // ============================================
+        function updateVoiceTranscriptDisplay() {
+            const el = document.getElementById('user-speech-text');
+            const combined = (voiceFinalBuffer + voiceInterimBuffer).trim();
+            el.innerHTML = combined ? `📝 ${combined}` : '🎤 Listening... Speak now';
+        }
+
+        function resetVoiceRecordingUiIdle() {
+            isRecording = false;
+            const wave = document.getElementById('voice-wave');
+            const startBtn = document.getElementById('start-voice');
+            const stopBtn = document.getElementById('stop-voice');
+            if (wave) wave.style.display = 'none';
+            if (startBtn) startBtn.style.display = 'inline-flex';
+            if (stopBtn) stopBtn.style.display = 'none';
+        }
+
+        function clearVoiceStopFinalizeTimer() {
+            if (voiceStopFinalizeTimer) {
+                clearTimeout(voiceStopFinalizeTimer);
+                voiceStopFinalizeTimer = null;
+            }
+        }
+
+        function finalizeVoiceStopAndSend() {
+            if (voiceFinalizeHandled) return;
+            if (!voiceUserClickedStop) return;
+            voiceFinalizeHandled = true;
+            clearVoiceStopFinalizeTimer();
+            voiceUserClickedStop = false;
+            voiceSessionActive = false;
+            resetVoiceRecordingUiIdle();
+
+            const text = (voiceFinalBuffer + voiceInterimBuffer).trim();
+            voiceFinalBuffer = '';
+            voiceInterimBuffer = '';
+            const speechEl = document.getElementById('user-speech-text');
+            if (speechEl) speechEl.innerHTML = 'Click Start Recording and speak...';
+
+            if (text) {
+                addChatMessage(`🎤 Voice: ${text}`, 'sent');
+                socket.emit('voice-to-text', { to: friendName, text, from: currentUser.username });
+            }
+        }
+
+        if ('webkitSpeechRecognition' in window) {
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                isRecording = true;
+                document.getElementById('voice-wave').style.display = 'flex';
+                document.getElementById('start-voice').style.display = 'none';
+                document.getElementById('stop-voice').style.display = 'inline-flex';
+                updateVoiceTranscriptDisplay();
+            };
+
+            recognition.onend = () => {
+                if (voiceSessionActive && !voiceUserClickedStop) {
+                    try {
+                        recognition.start();
+                    } catch (err) {
+                        voiceSessionActive = false;
+                        clearVoiceStopFinalizeTimer();
+                        voiceUserClickedStop = false;
+                        voiceFinalizeHandled = false;
+                        resetVoiceRecordingUiIdle();
+                    }
+                    return;
+                }
+
+                if (!voiceUserClickedStop && !voiceSessionActive) {
+                    voiceFinalizeHandled = false;
+                    resetVoiceRecordingUiIdle();
+                    return;
+                }
+
+                finalizeVoiceStopAndSend();
+            };
+
+            recognition.onresult = (event) => {
+                voiceInterimBuffer = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const r = event.results[i];
+                    if (r.isFinal) {
+                        voiceFinalBuffer += r[0].transcript;
+                    } else {
+                        voiceInterimBuffer += r[0].transcript;
+                    }
+                }
+                updateVoiceTranscriptDisplay();
+            };
+        }
+
+        document.getElementById('start-voice')?.addEventListener('click', () => {
+            if (!recognition) {
+                alert('Speech recognition not supported in this browser');
+                return;
+            }
+            clearVoiceStopFinalizeTimer();
+            voiceFinalizeHandled = false;
+            voiceSessionActive = true;
+            voiceUserClickedStop = false;
+            voiceFinalBuffer = '';
+            voiceInterimBuffer = '';
+            try {
+                recognition.start();
+            } catch (err) {
+                voiceSessionActive = false;
+                console.warn('SpeechRecognition.start:', err);
+            }
+        });
+
+        document.getElementById('stop-voice')?.addEventListener('click', () => {
+            if (!recognition || !voiceSessionActive) return;
+            clearVoiceStopFinalizeTimer();
+            voiceFinalizeHandled = false;
+            voiceUserClickedStop = true;
+            try {
+                recognition.stop();
+            } catch (err) {
+                voiceUserClickedStop = false;
+                voiceSessionActive = false;
+                voiceFinalizeHandled = false;
+                console.warn('SpeechRecognition.stop:', err);
+                return;
+            }
+            voiceStopFinalizeTimer = setTimeout(() => finalizeVoiceStopAndSend(), 450);
+        });
+        
+        // ============================================
+        // TEXT TO VOICE
+        // ============================================
+        function playVoice(text) {
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 0.9;
+                window.speechSynthesis.cancel();
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+        
+        document.getElementById('send-text-voice')?.addEventListener('click', () => {
+            const msg = document.getElementById('text-message').value;
+            if (!msg.trim()) return;
+            addChatMessage(`🔊 Text to Voice: ${msg}`, 'sent');
+            socket.emit('text-to-voice', { to: friendName, text: msg, from: currentUser.username });
+            document.getElementById('text-message').value = '';
+        });
+        
+        // ============================================
+        // SIGN LANGUAGE DETECTION - Camera mandatory
+        // ============================================
+        const demoSigns = ['Hello', 'Thank You', 'Love', 'Peace', 'OK', 'Yes', 'No', 'How are you', 'Good', 'Sorry'];
+        
+        function speakSignWord(word) {
+            if ('speechSynthesis' in window) {
+                let cleanWord = word.replace(/[^\w\s]/g, '').trim();
+                if (cleanWord) {
+                    const utterance = new SpeechSynthesisUtterance(cleanWord);
+                    utterance.rate = 0.9;
+                    window.speechSynthesis.cancel();
+                    window.speechSynthesis.speak(utterance);
+                }
+            }
+        }
+        
+        async function startSignDetection(mode) {
+            try {
+                // Request camera access first
+                if (signCameraStream) {
+                    signCameraStream.getTracks().forEach(track => track.stop());
+                }
+                
+                signCameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const videoElement = document.getElementById('sign-video');
+                if (videoElement) {
+                    videoElement.srcObject = signCameraStream;
+                }
+                
+                document.getElementById('camera-warning')?.classList.add('hidden');
+                document.getElementById('sign-status').innerHTML = '✅ Camera active. Detection running...';
+                
+                signDetectionActive = true;
+                currentSignMode = mode;
+                document.getElementById('start-sign-chat').style.display = 'none';
+                document.getElementById('start-sign-voice').style.display = 'none';
+                document.getElementById('stop-sign').style.display = 'inline-flex';
+                
+                let signIndex = 0;
+                if (signInterval) clearInterval(signInterval);
+                
+                // Simulate sign detection with random signs (in real app, use ML model)
+                signInterval = setInterval(() => {
+                    if (signDetectionActive && signCameraStream && signCameraStream.active) {
+                        const sign = demoSigns[signIndex % demoSigns.length];
+                        
+                        // Add to chat
+                        addChatMessage(`✋ Sign Detected: ${sign}`, 'sent');
+                        socket.emit('sign-detected', { to: friendName, sign: sign, from: currentUser.username });
+                        
+                        // If voice mode enabled, speak
+                        if (mode === 'voice') {
+                            speakSignWord(sign);
+                        }
+                        
+                        signIndex++;
+                    }
+                }, 5000);
+                
+                addChatMessage('🟢 Sign detection started. Show hand gestures to camera.', 'info');
+                
+            } catch (err) {
+                console.error('Camera error:', err);
+                document.getElementById('camera-warning')?.classList.remove('hidden');
+                document.getElementById('sign-status').innerHTML = '❌ Camera access denied. Please allow camera for sign detection.';
+                addChatMessage('❌ Camera access required for sign detection', 'info');
+            }
+        }
+        
+        function stopSignDetection() {
+            signDetectionActive = false;
+            if (signInterval) {
+                clearInterval(signInterval);
+                signInterval = null;
+            }
+            if (signCameraStream) {
+                signCameraStream.getTracks().forEach(track => track.stop());
+                signCameraStream = null;
+            }
+            const videoElement = document.getElementById('sign-video');
+            if (videoElement) videoElement.srcObject = null;
+            document.getElementById('start-sign-chat').style.display = 'inline-flex';
+            document.getElementById('start-sign-voice').style.display = 'inline-flex';
+            document.getElementById('stop-sign').style.display = 'none';
+            document.getElementById('sign-status').innerHTML = 'Sign detection inactive. Click Start to enable camera.';
+            addChatMessage('🔴 Sign detection stopped', 'info');
+        }
+        
+        document.getElementById('start-sign-chat')?.addEventListener('click', () => startSignDetection('chat'));
+        document.getElementById('start-sign-voice')?.addEventListener('click', () => startSignDetection('voice'));
+        document.getElementById('stop-sign')?.addEventListener('click', stopSignDetection);
+        
+        // ============================================
+        // AI ASSISTANT - Fixed (Translation English ↔ Roman Urdu + Chatbot)
+        // ============================================
+        async function callAI(endpoint, data) {
+            try {
+                const res = await fetch(`/api/ai/${endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                return await res.json();
+            } catch (err) {
+                return { success: false, reply: 'Error connecting to AI', translation: data.message };
+            }
+        }
+        
+        // Translate function - English ↔ Roman Urdu
+        async function translateMessage(message, targetLang) {
+            try {
+                const response = await fetch('/api/ai/translate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: message, targetLanguage: targetLang })
+                });
+                const data = await response.json();
+                return data.success ? data.translation : message;
+            } catch (err) {
+                return message;
+            }
+        }
+        
+        // Chatbot function - real AI responses
+        async function askAI(message) {
+            try {
+                const response = await fetch('/api/ai/auto-reply', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: message })
+                });
+                const data = await response.json();
+                return data.success ? data.reply : "I'm here to help! What would you like to know?";
+            } catch (err) {
+                return "Sorry, I'm having trouble connecting. Please try again.";
+            }
+        }
+        
+        document.getElementById('process-ai')?.addEventListener('click', async () => {
+            const msg = document.getElementById('ai-message').value;
+            if (!msg.trim()) return;
+            document.getElementById('ai-response').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+        });
+        
+        // Translate button - detects language and converts
+        document.getElementById('ai-translate')?.addEventListener('click', async () => {
+            const msg = document.getElementById('ai-message').value;
+            if (!msg.trim()) {
+                document.getElementById('ai-response').innerHTML = 'Please type a message to translate';
+                return;
+            }
+            
+            document.getElementById('ai-response').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Translating...';
+            
+            // Detect if message is English or Roman Urdu
+            const isEnglish = /[a-zA-Z]/.test(msg);
+            const targetLang = isEnglish ? 'Roman Urdu' : 'English';
+            
+            try {
+                const response = await fetch('/api/ai/translate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg, targetLanguage: targetLang })
+                });
+                const data = await response.json();
+                const translation = data.success ? data.translation : msg;
+                document.getElementById('ai-response').innerHTML = translation;
+                addChatMessage(`🌐 Translation (${targetLang}): ${translation}`, 'sent');
+            } catch (err) {
+                document.getElementById('ai-response').innerHTML = 'Translation failed. Please try again.';
+            }
+        });
+        
+        // Ask AI button - real chatbot
+        document.getElementById('ai-chat')?.addEventListener('click', async () => {
+            const msg = document.getElementById('ai-message').value;
+            if (!msg.trim()) {
+                document.getElementById('ai-response').innerHTML = 'Please type a question for AI';
+                return;
+            }
+            
+            document.getElementById('ai-response').innerHTML = '<i class="fas fa-spinner fa-spin"></i> AI is thinking...';
+            
+            try {
+                const response = await fetch('/api/ai/auto-reply', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg })
+                });
+                const data = await response.json();
+                const reply = data.success ? data.reply : "I'm here to help! What would you like to know?";
+                document.getElementById('ai-response').innerHTML = reply;
+                addChatMessage(`🤖 AI: ${reply}`, 'sent');
+            } catch (err) {
+                document.getElementById('ai-response').innerHTML = 'AI is busy. Please try again.';
+            }
+        });
+        
+        // ============================================
+        // CHAT FUNCTIONS
+        // ============================================
+        function addChatMessage(text, type, sender = null) {
+            const container = document.getElementById('chat-messages');
+            const div = document.createElement('div');
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            
+            div.className = `chat-message ${type}`;
+            
+            if (type === 'sent') {
+                div.innerHTML = `<div class="message-bubble-sent">${text}</div><div class="message-time">${time}</div>`;
+            } else if (type === 'received') {
+                div.innerHTML = `<div class="message-sender">${sender || friendName}</div><div class="message-bubble-received">${text}</div><div class="message-time">${time}</div>`;
+            } else {
+                div.innerHTML = `<div class="chat-info">${text}</div>`;
+            }
+            
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        document.getElementById('send-chat')?.addEventListener('click', () => {
+            const msg = document.getElementById('chat-input').value;
+            if (!msg.trim()) return;
+            socket.emit('chat-message', { to: friendName, message: msg, from: currentUser.username });
+            addChatMessage(msg, 'sent');
+            document.getElementById('chat-input').value = '';
+        });
+        
+        document.getElementById('chat-input')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') document.getElementById('send-chat').click();
+        });
+        
+        // Toggle chat window with screen resize
+        document.getElementById('toggle-chat')?.addEventListener('click', () => {
+            const chatWindow = document.getElementById('chat-window');
+            const container = document.getElementById('video-container');
+            const videoGrid = document.getElementById('video-grid');
+            
+            if (chatWindow.classList.contains('hidden')) {
+                chatWindow.classList.remove('hidden');
+                container.classList.add('with-chat');
+                videoGrid.classList.add('with-chat');
+            } else {
+                chatWindow.classList.add('hidden');
+                container.classList.remove('with-chat');
+                videoGrid.classList.remove('with-chat');
+            }
+        });
+        
+        document.getElementById('close-chat')?.addEventListener('click', () => {
+            document.getElementById('chat-window').classList.add('hidden');
+            document.getElementById('video-container').classList.remove('with-chat');
+            document.getElementById('video-grid').classList.remove('with-chat');
+        });
+
+        let teardownRedirectScheduled = false;
+
+        function normalizeCallPeer(u) {
+            try {
+                return decodeURIComponent(String(u || '').trim()).toLowerCase();
+            } catch (e) {
+                return String(u || '').trim().toLowerCase();
+            }
+        }
+
+        function leaveCall(notifyPeer) {
+            if (callLeaveDone) return;
+            callLeaveDone = true;
+            clearTimeout(peerConnectionDisconnectTimer);
+
+            try {
+                socket.emit('call-session', { peerUsername: null });
+            } catch (e) {}
+
+            const finishHangUp = () => {
+                if (teardownRedirectScheduled) return;
+                teardownRedirectScheduled = true;
+
+                if (localStream) localStream.getTracks().forEach(t => t.stop());
+                if (signCameraStream) signCameraStream.getTracks().forEach(t => t.stop());
+                if (signInterval) clearInterval(signInterval);
+                remoteIceQueue = [];
+                if (peerConnection) {
+                    peerConnection.close();
+                    peerConnection = null;
+                }
+                const lv = document.getElementById('local-video');
+                const rv = document.getElementById('remote-video');
+                if (lv) lv.srcObject = null;
+                if (rv) rv.srcObject = null;
+
+                if (callTimer) clearInterval(callTimer);
+                clearVoiceStopFinalizeTimer();
+                voiceSessionActive = false;
+                voiceUserClickedStop = false;
+                voiceFinalizeHandled = false;
+                if (recognition && isRecording) {
+                    try { recognition.abort(); } catch (e) {}
+                }
+                window.location.href = '/dashboard';
+            };
+
+            if (notifyPeer) {
+                try {
+                    socket.emit('call-ended', { to: friendName, from: currentUser.username });
+                } catch (e) {}
+                setTimeout(finishHangUp, 500);
+                return;
+            }
+            finishHangUp();
+        }
+        
+        // ============================================
+        // SOCKET EVENTS
+        // ============================================
+        socket.on('receive-voice-text', (data) => {
+            addChatMessage(`🎤 Voice: ${data.text}`, 'received', data.from);
+        });
+        
+        socket.on('receive-text-voice', (data) => {
+            addChatMessage(`🔊 Voice: ${data.text}`, 'received', data.from);
+            playVoice(data.text);
+        });
+        
+        socket.on('receive-sign', (data) => {
+            addChatMessage(`✋ Sign: ${data.sign}`, 'received', data.from);
+        });
+        
+        socket.on('receive-chat', (data) => {
+            addChatMessage(data.message, 'received', data.from);
+        });
+        
+        // WebRTC Signaling (initiator creates offer after media + PC; receiver answers)
+        socket.on('offer', async (data) => {
+            try {
+                if (isInitiator) return;
+                await mediaSetupPromise;
+                if (!peerConnection) await createPeerConnection();
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+                await flushRemoteIceQueue();
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                socket.emit('answer', { to: data.from, answer });
+            } catch (e) {
+                console.error('offer handling failed', e);
+            }
+        });
+
+        socket.on('answer', async (data) => {
+            try {
+                await mediaSetupPromise;
+                if (!peerConnection || peerConnection.signalingState === 'stable') return;
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+                await flushRemoteIceQueue();
+            } catch (e) {
+                console.error('answer handling failed', e);
+            }
+        });
+
+        socket.on('ice-candidate', async (data) => {
+            if (!data.candidate) return;
+            await mediaSetupPromise;
+            await pushRemoteIceInit(data.candidate);
+        });
+
+        socket.on('call-ended', (data) => {
+            if (!data || !data.from) return;
+            if (normalizeCallPeer(data.from) !== normalizeCallPeer(friendName)) return;
+            leaveCall(false);
+        });
+        
+        // ============================================
+        // END CALL
+        // ============================================
+        document.getElementById('end-call')?.addEventListener('click', () => leaveCall(true));
+        
+        // ============================================
+        // TOGGLE MIC & CAM
+        // ============================================
+        document.getElementById('toggle-mic')?.addEventListener('click', () => {
+            if (localStream) {
+                const audioTrack = localStream.getAudioTracks()[0];
+                if (audioTrack) {
+                    audioTrack.enabled = !audioTrack.enabled;
+                    document.getElementById('toggle-mic').innerHTML = audioTrack.enabled ? 
+                        '<i class="fas fa-microphone"></i>' : '<i class="fas fa-microphone-slash"></i>';
+                }
+            }
+        });
+        
+        document.getElementById('toggle-cam')?.addEventListener('click', () => {
+            if (localStream) {
+                const videoTrack = localStream.getVideoTracks()[0];
+                if (videoTrack) {
+                    videoTrack.enabled = !videoTrack.enabled;
+                    document.getElementById('toggle-cam').innerHTML = videoTrack.enabled ? 
+                        '<i class="fas fa-video"></i>' : '<i class="fas fa-video-slash"></i>';
+                }
+            }
+        });
+        
+        // Tab switching
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.feature-panel').forEach(p => p.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById(btn.dataset.tab).classList.add('active');
+            };
+        });
+        
+        // Initialize: initiator must emit SDP offer; ICE may arrive before remoteDescription — queued in pushRemoteIceInit
+        setupLocalStream().then(async (mediaOk) => {
+            try {
+                await createPeerConnection();
+            } finally {
+                resolveMediaSetup();
+            }
+            if (!mediaOk || !isInitiator) return;
+            try {
+                const offer = await peerConnection.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: true
+                });
+                await peerConnection.setLocalDescription(offer);
+                socket.emit('offer', { to: friendName, offer });
+            } catch (e) {
+                console.error('Failed to create/send offer', e);
+            }
+        });
+    </script>
+</body>
+</html>

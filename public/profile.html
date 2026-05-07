@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EchoMeet - Profile</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    </head>
+<body>
+    <canvas id="bg-canvas"></canvas>
+    
+    <div class="profile-container">
+        <div class="profile-header">
+            <a href="/dashboard" class="back-btn"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+            <h2><i class="fas fa-user-edit"></i> Update Profile</h2>
+            <div class="profile-header-spacer"></div>
+        </div>
+        
+        <div class="profile-content">
+            <div class="profile-card">
+                <h3><i class="fas fa-user-circle"></i> Profile Information</h3>
+                <div class="avatar-section">
+                    <div class="avatar-preview">
+                        <i class="fas fa-user-circle" id="avatar-preview"></i>
+                    </div>
+                    <div class="avatar-options">
+                        <p>Choose Avatar</p>
+                        <div class="avatar-list">
+                            <div class="avatar-option" data-avatar="user-circle"><i class="fas fa-user-circle"></i></div>
+                            <div class="avatar-option" data-avatar="user-astronaut"><i class="fas fa-user-astronaut"></i></div>
+                            <div class="avatar-option" data-avatar="user-ninja"><i class="fas fa-user-ninja"></i></div>
+                            <div class="avatar-option" data-avatar="user-graduate"><i class="fas fa-user-graduate"></i></div>
+                            <div class="avatar-option" data-avatar="user-tie"><i class="fas fa-user-tie"></i></div>
+                            <div class="avatar-option" data-avatar="user-md"><i class="fas fa-user-md"></i></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="username" placeholder="Username">
+                </div>
+                
+                <div class="form-group">
+                    <label>Bio</label>
+                    <textarea id="bio" placeholder="Tell us about yourself..."></textarea>
+                </div>
+                
+                <button class="btn-primary" id="update-profile">Update Profile</button>
+            </div>
+            
+            <div class="profile-card">
+                <h3><i class="fas fa-key"></i> Change Password</h3>
+                <div class="form-group">
+                    <label>Current Password</label>
+                    <input type="password" id="current-password" placeholder="Enter current password">
+                </div>
+                <div class="form-group">
+                    <label>New Password</label>
+                    <input type="password" id="new-password" placeholder="Enter new password">
+                </div>
+                <div class="form-group">
+                    <label>Confirm New Password</label>
+                    <input type="password" id="confirm-password" placeholder="Confirm new password">
+                </div>
+                <button class="btn-primary" id="update-password">Update Password</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="three-bg.js"></script>
+    <script>
+        const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+        if (!currentUser.username) window.location.href = '/login';
+        
+        document.getElementById('username').value = currentUser.username || '';
+        
+        // Load saved bio
+        const savedBio = localStorage.getItem(`bio_${currentUser.id}`) || '';
+        document.getElementById('bio').value = savedBio;
+        
+        // Avatar selection
+        document.querySelectorAll('.avatar-option').forEach(opt => {
+            opt.onclick = () => {
+                const avatar = opt.dataset.avatar;
+                document.getElementById('avatar-preview').className = `fas fa-${avatar}`;
+                localStorage.setItem(`avatar_${currentUser.id}`, avatar);
+            };
+        });
+        
+        // Load saved avatar
+        const savedAvatar = localStorage.getItem(`avatar_${currentUser.id}`);
+        if (savedAvatar) {
+            document.getElementById('avatar-preview').className = `fas fa-${savedAvatar}`;
+        }
+        
+        // Update profile
+        document.getElementById('update-profile').onclick = () => {
+            const newUsername = document.getElementById('username').value;
+            const bio = document.getElementById('bio').value;
+            
+            localStorage.setItem(`bio_${currentUser.id}`, bio);
+            if (newUsername !== currentUser.username) {
+                currentUser.username = newUsername;
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+            }
+            
+            alert('✅ Profile updated successfully!');
+        };
+        
+        // Update password
+        document.getElementById('update-password').onclick = () => {
+            const currentPass = document.getElementById('current-password').value;
+            const newPass = document.getElementById('new-password').value;
+            const confirmPass = document.getElementById('confirm-password').value;
+            
+            if (!currentPass) {
+                alert('Please enter current password');
+                return;
+            }
+            if (newPass !== confirmPass) {
+                alert('New passwords do not match!');
+                return;
+            }
+            if (newPass.length < 4) {
+                alert('Password must be at least 4 characters');
+                return;
+            }
+            
+            alert('✅ Password changed successfully!');
+            document.getElementById('current-password').value = '';
+            document.getElementById('new-password').value = '';
+            document.getElementById('confirm-password').value = '';
+        };
+    </script>
+</body>
+</html>
